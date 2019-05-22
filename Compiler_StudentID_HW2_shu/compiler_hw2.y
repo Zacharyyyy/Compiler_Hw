@@ -8,12 +8,15 @@ extern int yylineno;
 extern int yylex();
 extern char* yytext;   // Get current token from lex
 extern char buf[256];  // Get current code line from lex
+extern int new_scope;
+extern int scope_line;
 
 /* Symbol table function - you can add new function if needed. */
 int lookup_symbol();
 void create_symbol();
 void insert_symbol();
 void dump_symbol();
+void increase_scope();
 
 struct Table{
     int flag;
@@ -27,6 +30,7 @@ struct Table{
 struct Table sym_tab[t_size];
 int sym_tab_idx = 0;
 int Scope = 0;
+int where_in_table[t_size] = {0};
 int dec_flag = 0; // if current line is a declare line, '1'
 int uflag;
 
@@ -45,8 +49,7 @@ char dec_name[20] = {0};// declared name
 
 /* Token without return */
 %token PRINT 
-%token IF ELSE FOR WHILE
-%token ID 
+%token IF ELSE FOR WHILE 
 %token ADD SUB MUL DIV MOD
 %token INC DEC
 %token MT LT MTE LTE EQ NE
@@ -63,7 +66,7 @@ char dec_name[20] = {0};// declared name
 %token <i_val> I_CONST
 %token <f_val> F_CONST
 %token <string> STR_CONST
-%token <string> INT STRING FLOAT BOOL VOID
+%token <string> INT STRING FLOAT BOOL VOID ID
 
 /* Nonterminal with return, which need to sepcify type */
 //%type <f_val> stat
@@ -71,6 +74,9 @@ char dec_name[20] = {0};// declared name
 %type <string> func_declaration
 %type <string> para_declaration
 %type <string> Type
+%type <string> para_list
+%type <string> vars
+%type <string> init_declarator_list
 
 /* Yacc will start at this nonterminal */
 %start program
@@ -89,16 +95,12 @@ stat_list
 ;
 
 stat
-    : init_declarator { insert_symbol(1, $1, Scope);
-                        dec_flag = 1;
-                    }
+    : init_declarator
     | compound_stat
     | exp SEMICOLON
     | print_func
     | func_def
-    | func_declaration{ insert_symbol(0, $1, Scope);
-                        dec_flag = 1;
-                    }
+    | func_declaration
     | func_usage
     | selection_stat
     | iteration_stat
@@ -108,18 +110,18 @@ stat
 
 /*initailize variable*/
 init_declarator
-    : Type init_declarator_list SEMICOLON
-    | Type exp SEMICOLON
+    : Type init_declarator_list SEMICOLON {insert_symbol(1, $2, $1, "", Scope);}
+    | Type ID ASGN exp SEMICOLON { insert_symbol(0, $2, $1, "", Scope);} 
 ;
 
 init_declarator_list
-    : vars
+    : vars {$$ = $1;}
     | init_declarator_list COMMA vars
 ;
 
 vars
-    : ID
-    | ID ASGN initializer 
+    : ID {$$ = $1;}
+    | ID ASGN initializer {$$ = $1;}
 ;
 
 initializer
@@ -153,13 +155,16 @@ selection_stat
 
 /*function part*/
 func_def
-    : Type ID LB para_list RB LCB compound_stat  return_state RCB
-    | Type ID LB para_list RB LCB return_state RCB
-    | Type ID LB para_list RB LCB  stat_list return_state RCB
+    : Type ID LB para_list RB LCB compound_stat  return_state RCB{ insert_symbol(0, $2, $1, $4, Scope); dec_flag = 1;}
+    | Type ID LB para_list RB LCB return_state RCB { insert_symbol(0, $2, $1, $4, Scope); dec_flag = 1;}
+    | Type ID LB para_list RB LCB  stat_list return_state RCB { insert_symbol(0, $2, $1, $4, Scope); dec_flag = 1;}
+    | Type ID LB RB LCB compound_stat  return_state RCB {insert_symbol(0, $2, $1, "", Scope);}
+    | Type ID LB RB LCB  stat_list return_state RCB {insert_symbol(0, $2, $1, "", Scope);}
+    | Type ID LB RB LCB return_state RCB  {insert_symbol(0, $2, $1, "", Scope);}
 ;
 
 func_declaration
-    : Type ID LB para_list RB SEMICOLON
+    : Type ID LB para_list RB SEMICOLON { insert_symbol(0, $2, $1, $4, Scope); dec_flag = 1;}
 
 ;
 func_usage
@@ -167,8 +172,12 @@ func_usage
 ;
 
 para_list
-    : para_list para_declaration
-    |
+    : Type ID COMMA para_list { sprintf($$, "%s, %s", $1, $4);
+                                insert_symbol(2, $2, $1, "", Scope+1);
+                            }
+    | Type ID   { insert_symbol(2, $2, $1, "", Scope+1);
+                  sprintf($$, "%s", $1);
+                }
 ;
 
 aug_list
@@ -186,13 +195,6 @@ aug
     | FALSE
 ;
 
-para_declaration
-    : Type ID   { insert_symbol(2, $1, Scope+1);
-                }
-    | Type ID COMMA { insert_symbol(2, $1, Scope+1);
-
-    }
-;
 
 compound_stat
     : LCB RCB
@@ -231,7 +233,7 @@ postfix
 
 term
     : LB exp RB
-    | ID
+    | ID {}
     | STR_CONST
     | I_CONST
     | F_CONST
@@ -297,6 +299,7 @@ int main(int argc, char** argv)
 
     create_symbol();
     yyparse();
+    dump_symbol();
 	printf("\nTotal lines: %d \n",yylineno);
 
     return 0;
@@ -312,32 +315,24 @@ void yyerror(char *s)
 
 void create_symbol() {
     //initailize the symbal table
-    for(int i; i < t_size; ++i){
+    for(int i = 0; i < t_size; ++i){
         memset(sym_tab[i].name, 0, strlen(sym_tab[i].name));
         memset(sym_tab[i].kind, 0, strlen(sym_tab[i].kind));
-        memset(sym_tab[i].kind, 0, strlen(sym_tab[i].kind));
         memset(sym_tab[i].attribute, 0, strlen(sym_tab[i].attribute));
-        sym_tab[i].scope = 0;
+        sym_tab[i].scope = -1;
         sym_tab[i].flag = 0;
+    }
+
+    for(int i = 0; i < t_size; ++i){
+        where_in_table[i] = 100;
     }
 }
 
-void insert_symbol(int kind, char name_type[], int s) {
+void insert_symbol(int kind, char name[], char type[], char attr[],  int s) {
     //kind: 0=func, 1=var, 2=para
-    char name[20] = {0};
-    char type[20] = {0};
-
+    
     // function
-    if(!strcmp(type , "0")){
-        char attr[30] = {0};
-        sscanf(name_type, "%s %s", type, name);
-        int sn = 0, i = 0;
-        while(sn , 2){
-            if(name_type[i] == ' ')
-                ++sn;
-            ++i;
-        }
-        strncpy(attr, name_type, strlen(name_type));
+    if(kind == 0){
         sprintf(sym_tab[sym_tab_idx].name, "%s", name);
         sprintf(sym_tab[sym_tab_idx].type, "%s", type);
         sprintf(sym_tab[sym_tab_idx].kind, "%s", "function");
@@ -345,8 +340,7 @@ void insert_symbol(int kind, char name_type[], int s) {
         sprintf(sym_tab[sym_tab_idx].attribute, "%s", attr);
     }
     // variable
-    else if(!strcmp(type, "1")){
-        sscanf(name_type, "%s %s", type, name);
+    else if(kind == 1){
         sprintf(sym_tab[sym_tab_idx].name, "%s", name);
         sprintf(sym_tab[sym_tab_idx].type, "%s", type);
         sprintf(sym_tab[sym_tab_idx].kind, "%s", "variable");
@@ -354,19 +348,71 @@ void insert_symbol(int kind, char name_type[], int s) {
     }
     // else
     else{
-        sscanf(name_type, "%s %s", type, name);
         sprintf(sym_tab[sym_tab_idx].name, "%s", name);
         sprintf(sym_tab[sym_tab_idx].type, "%s", type);
         sprintf(sym_tab[sym_tab_idx].kind, "%s", "parameter");
         sym_tab[sym_tab_idx].scope = s;
     }
-
     ++sym_tab_idx;
 }
 
 int lookup_symbol() {}
-void dump_symbol() {
-    printf("\n%-10s%-10s%-12s%-10s%-10s%-10s\n\n",
-           "Index", "Name", "Kind", "Type", "Scope", "Attribute");
+
+void search_scope(){
+    int where = 0;
+    int i;
+    for(i = 0; i < t_size; ++i){
+        //printf("%s %d,%s %d\n", "scope =", sym_tab[i].scope,"Scope =", Scope);
+        if(sym_tab[i].scope == Scope){
+            where_in_table[where] = i;
+            ++where;
+        }
+    }
 }
 
+void dump_symbol() {
+    int i;
+    int Index = 0;
+
+    search_scope();
+
+    if(where_in_table[0] != 100){
+        printf("\n%-10s%-10s%-12s%-10s%-10s%-10s\n\n",
+            "Index", "Name", "Kind", "Type", "Scope", "Attribute");
+    }
+    /*
+    for(i = 0; i < t_size; ++i)
+        printf("%d ", where_in_table[i]);
+    */
+    for(i = 0; i < t_size; ++i){
+        if(where_in_table[i] == 100)
+            break;
+        if(where_in_table[i] != 100){
+            //printf("%d\n", where_in_table[i]);
+
+            printf("%-10d%-10s%-12s%-10s%-10d%-10s\n\n",
+            Index, 
+            sym_tab[where_in_table[i]].name, 
+            sym_tab[where_in_table[i]].kind,
+            sym_tab[where_in_table[i]].type, 
+            sym_tab[where_in_table[i]].scope, 
+            sym_tab[where_in_table[i]].attribute);
+            ++Index;
+
+            memset(sym_tab[where_in_table[i]].name, 0, strlen(sym_tab[i].name));
+            memset(sym_tab[where_in_table[i]].kind, 0, strlen(sym_tab[i].kind));
+            memset(sym_tab[where_in_table[i]].attribute, 0, strlen(sym_tab[i].attribute));
+            sym_tab[where_in_table[i]].scope = -1;
+            sym_tab[where_in_table[i]].flag = 0;
+        }
+    }
+
+
+    for(i = 0; i < t_size; ++i)
+        where_in_table[i] = 100;
+    --Scope;
+}
+
+void increase_scope(){
+    ++Scope;
+}

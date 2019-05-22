@@ -8,6 +8,11 @@
 	char buf[256];
 
 	void print_out_lines();
+	extern void dump_symbol();
+	extern void increase_scope();
+
+	int new_scope = 0;
+	int scope_line = 0;
 
 	#define CONCAT { strncat(buf, yytext, 256 - strlen(buf) - 1); }
 
@@ -70,8 +75,9 @@ str \"(.+)\"
 "!"		  	{ CONCAT; return NOT;}
 "("		  	{ CONCAT; return LB;}
 ")"		  	{ CONCAT; return RB;}
-"{"		  	{ CONCAT; return LCB;}
-"}"		  	{ CONCAT; return RCB;}
+"{"		  	{ increase_scope(); CONCAT; return LCB;}
+"}"		  	{ printf("%d %s\n", yylineno+1, "}"); 
+			dump_symbol(); CONCAT; return RCB;}
 "void"		{ yylval.string = strdup(yytext); CONCAT; return VOID;}
 "bool"		{ yylval.string = strdup(yytext); CONCAT; return BOOL;}
 "true"		{ CONCAT; return TRUE;}
@@ -84,7 +90,7 @@ str \"(.+)\"
 
 {integer}	{ CONCAT; return I_CONST;}
 {float} { CONCAT; return F_CONST;}
-{id}		{ CONCAT; return ID;}
+{id}		{ yylval.string = strdup(yytext); CONCAT; return ID;}
 
 {comment}	{ CONCAT; }
 {plus_comment} { CONCAT; }
@@ -98,6 +104,14 @@ str \"(.+)\"
 
 void print_out_lines()
 {   
+	int i;
+	for( i = 0; i < 256; ++i){
+		if(buf[i] == '}'){
+			memset(buf, 0, 255);
+			return;
+		}
+	}
+
     printf("%d ", yylineno);
     printf("%s\n", buf);
     memset(buf, 0, 255);

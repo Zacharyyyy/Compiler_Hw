@@ -4,6 +4,7 @@
 
 float c = 1.5;
 
+
 bool loop(int n, int m) {
     while (n > m) {
         n--;
@@ -19,6 +20,7 @@ int main() {
     string y = "She is a girl";
 
     print(y); // print
+
 
     // if condition
     if (a > 10) {
