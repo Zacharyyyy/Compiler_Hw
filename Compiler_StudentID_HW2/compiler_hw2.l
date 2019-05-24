@@ -10,6 +10,10 @@
 	void print_out_lines();
 	extern void dump_symbol();
 	extern void increase_scope();
+	extern int used_func;
+	extern int dumping;
+	extern int Scope;
+	extern int sem_error;
 
 	int new_scope = 0;
 	int scope_line = 0;
@@ -31,9 +35,11 @@ id {letter}+({letter}|{digit})*
 number {digit}+
 integer {digit}+
 float {digit}*"."{number}
-comment "/*"([^*]|\*+[^*/])*\*+"/"
 plus_comment "//".*
 str \"(.+)\"
+
+%x COMMENT STRING_STATE
+
 /* Rules section */
 %%
 
@@ -61,7 +67,7 @@ str \"(.+)\"
 "else"		{ CONCAT; return ELSE;}
 "for"		{ CONCAT; return FOR;}
 "while"		{ CONCAT; return WHILE;}
-"string"	{ CONCAT; return STRING;}
+"string"	{ yylval.string = strdup(yytext); CONCAT; return STRING;}
 "int"		{ yylval.string = strdup(yytext); CONCAT; return INT;}
 "float"		{ yylval.string = strdup(yytext); CONCAT; return FLOAT;}
 "="			{ CONCAT; return ASGN;}
@@ -76,8 +82,8 @@ str \"(.+)\"
 "("		  	{ CONCAT; return LB;}
 ")"		  	{ CONCAT; return RB;}
 "{"		  	{ increase_scope(); CONCAT; return LCB;}
-"}"		  	{ printf("%d %s\n", yylineno+1, "}"); 
-			dump_symbol(); CONCAT; return RCB;}
+"}"		  	{ CONCAT;
+			dumping = Scope;  return RCB;}
 "void"		{ yylval.string = strdup(yytext); CONCAT; return VOID;}
 "bool"		{ yylval.string = strdup(yytext); CONCAT; return BOOL;}
 "true"		{ CONCAT; return TRUE;}
@@ -92,29 +98,41 @@ str \"(.+)\"
 {float} { CONCAT; return F_CONST;}
 {id}		{ yylval.string = strdup(yytext); CONCAT; return ID;}
 
-{comment}	{ CONCAT; }
 {plus_comment} { CONCAT; }
 {str}	{ CONCAT; return STR_CONST;}
 
+"/*" 				{CONCAT; BEGIN COMMENT;}
+<COMMENT>[^*\n]+ 	{CONCAT;}
+<COMMENT>\n			{print_out_lines();}
+<COMMENT>"*"		{CONCAT;}
+<COMMENT>"*/"		{CONCAT; BEGIN INITIAL;}
 
-
-
+[ \t]				{CONCAT;}
+[^ \t\n]			{CONCAT;}
 
 %%
 
 void print_out_lines()
 {   
 	int i;
-	for( i = 0; i < 256; ++i){
-		if(buf[i] == '}'){
-			memset(buf, 0, 255);
-			return;
-		}
-	}
 
-    printf("%d ", yylineno);
-    printf("%s\n", buf);
-    memset(buf, 0, 255);
+	if(sem_error == 0){
+		printf("%d", yylineno);
+		if(strlen(buf) > 0){
+			printf(": ");
+		}
+		else{
+			printf(":");
+		}
+		printf("%s\n", buf);
+		memset(buf, 0, 255);
+
+		if(dumping != -1){
+			dump_symbol();
+		}
+		sem_error = 0;
+	}
+	sem_error = 0;
 }
 
 
